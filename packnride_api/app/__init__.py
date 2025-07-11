@@ -3,14 +3,18 @@ from flask_jwt_extended import JWTManager
 from ..config import app_config
 
 # In-memory 'database' for simplicity
-users_db = {}  # Store user data: {email: user_object}
-rides_db = {}  # Store ride data: {ride_id: ride_object}
+users_db = {}
+rides_db = {}
+driving_events_db = {}
+driver_scores_db = {}
+incident_reports_db = {}
 
-# Class to manage ID generation for in-memory store
 class IDManager:
     def __init__(self):
         self.user_id_counter = 0
         self.ride_id_counter = 0
+        self.driving_event_id_counter = 0
+        self.incident_report_id_counter = 0
 
     def get_next_user_id(self):
         self.user_id_counter += 1
@@ -20,46 +24,45 @@ class IDManager:
         self.ride_id_counter += 1
         return self.ride_id_counter
 
-id_manager = IDManager()
+    def get_next_driving_event_id(self):
+        self.driving_event_id_counter += 1
+        return self.driving_event_id_counter
 
+    def get_next_incident_report_id(self):
+        self.incident_report_id_counter += 1
+        return self.incident_report_id_counter
+
+id_manager = IDManager()
 jwt = JWTManager()
 
 def create_app(config_object=app_config):
-    """
-    Application factory pattern: creates and configures the Flask app.
-    """
     app = Flask(__name__)
     app.config.from_object(config_object)
-
-    # Initialize extensions
     jwt.init_app(app)
 
-    # Register Blueprints
     from .auth import auth_bp
     from .routes import main_bp
+    from .monitoring_routes import monitoring_bp # Import new blueprint
 
     app.register_blueprint(auth_bp, url_prefix='/auth')
     app.register_blueprint(main_bp, url_prefix='/api')
+    app.register_blueprint(monitoring_bp, url_prefix='/api/monitoring') # Register it
 
     @app.route('/health')
     def health_check():
         return "PacknRide API is healthy!", 200
 
-    # Callback for defining user identity from JWT
     @jwt.user_identity_loader
-    def user_identity_lookup(user_identity):
-        return user_identity # The identity is already a dict from create_access_token
+    def user_identity_lookup(user_identity_dict):
+        return user_identity_dict
 
-    # Optional: Callback for loading user object from identity (if needed by @jwt_required)
-    # For simple cases where identity is enough, this isn't strictly necessary
-    # but good practice if you need to load the full user object often.
-    # @jwt.user_lookup_loader
-    # def user_lookup_callback(_jwt_header, jwt_data):
-    #     identity = jwt_data["sub"] # 'sub' is the key for identity in jwt_data
-    #     user_email = identity.get("email")
-    #     if user_email and user_email in users_db:
-    #         return users_db[user_email]
-    #     return None
-
+    @jwt.additional_claims_loader
+    def add_claims_to_access_token(identity):
+        user_email = identity.get("email")
+        is_admin_claim = False
+        if user_email and user_email in users_db:
+            user = users_db[user_email]
+            is_admin_claim = user.get("is_admin", False)
+        return {"is_admin": is_admin_claim}
 
     return app
